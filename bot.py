@@ -4,7 +4,6 @@ import sqlite3
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
-import google.generativeai as genai
 from google import genai
 # =========================
 # LOAD ENV VARIABLES
