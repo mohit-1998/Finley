@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 import google.generativeai as genai
-
+from google import genai
 # =========================
 # LOAD ENV VARIABLES
 # =========================
@@ -14,8 +14,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================
 # DATABASE SETUP
@@ -53,19 +52,11 @@ def normalize(text):
 
 def parse_with_gemini(user_text):
     prompt = f"""
-You are a finance assistant.
+Extract structured data from this:
 
-Extract structured data from user input.
+"{user_text}"
 
-Rules:
-- If it's expense → type = "expense"
-- If income → type = "income"
-- Category should be simple (Food, Petrol, Salary, etc.)
-- Account should be like bank name (HDFC, ICICI, Cash)
-
-Message: "{user_text}"
-
-Return ONLY valid JSON in this format:
+Return JSON:
 {{
   "amount": number,
   "category": string,
@@ -73,7 +64,12 @@ Return ONLY valid JSON in this format:
   "type": "expense" or "income"
 }}
 """
-    response = model.generate_content(prompt)
+
+    response = client.models.generate_content(
+        model="gemini-1.5-flash",
+        contents=prompt
+    )
+
     return response.text
 
 # =========================
