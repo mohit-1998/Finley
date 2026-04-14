@@ -1,22 +1,20 @@
 import os
 import json
 import sqlite3
-from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 from google import genai
-# =========================
-# LOAD ENV VARIABLES
-# =========================
-load_dotenv()
 
+# =========================
+# ENV VARIABLES
+# =========================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================
-# DATABASE SETUP
+# DATABASE
 # =========================
 conn = sqlite3.connect("expenses.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -49,13 +47,27 @@ conn.commit()
 def normalize(text):
     return text.strip().lower()
 
+def clean_json(text):
+    text = text.strip()
+
+    if text.startswith("```"):
+        text = text.replace("```json", "").replace("```", "").strip()
+
+    return text
+
 def parse_with_gemini(user_text):
     prompt = f"""
 Extract structured data from this:
 
 "{user_text}"
 
-Return JSON:
+STRICT RULES:
+- Return ONLY pure JSON
+- NO markdown
+- NO explanation
+- NO backticks
+
+Format:
 {{
   "amount": number,
   "category": string,
@@ -76,10 +88,10 @@ Return JSON:
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome to AI Expense Tracker Bot!\n\n"
-        "Example:\n"
+        "👋 AI Expense Tracker Bot\n\n"
+        "Examples:\n"
         "👉 Petrol 500 from HDFC\n"
-        "👉 Salary 20000 in ICICI\n\n"
+        "👉 Salary 20000 in HDFC\n\n"
         "Commands:\n"
         "/add_account HDFC 10000\n"
         "/balance"
@@ -124,17 +136,21 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 # =========================
-# MAIN MESSAGE HANDLER
+# MAIN HANDLER
 # =========================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     user_text = update.message.text
 
-    # Step 1: Gemini parsing
     try:
         raw = parse_with_gemini(user_text)
-        data = json.loads(raw)
-    except:
+        print("RAW GEMINI:", raw)  # debug log
+
+        cleaned = clean_json(raw)
+        data = json.loads(cleaned)
+
+    except Exception as e:
+        print("ERROR:", e)
         await update.message.reply_text("❌ Couldn't understand. Try: Petrol 500 from HDFC")
         return
 
@@ -147,7 +163,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Missing data. Try again.")
         return
 
-    # Step 2: Check account exists
+    # check account
     cursor.execute("""
     SELECT balance FROM accounts WHERE user_id=? AND name=?
     """, (user_id, account))
@@ -155,10 +171,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     row = cursor.fetchone()
 
     if not row:
-        await update.message.reply_text(f"⚠️ Account '{account}' not found. Add using /add_account")
+        await update.message.reply_text(f"⚠️ Account '{account}' not found. Use /add_account")
         return
 
-    # Step 3: Update balance
+    # update balance
     if txn_type == "expense":
         cursor.execute("""
         UPDATE accounts SET balance = balance - ?
@@ -170,7 +186,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         WHERE user_id=? AND name=?
         """, (amount, user_id, account))
 
-    # Step 4: Save transaction
+    # insert transaction
     cursor.execute("""
     INSERT INTO transactions (user_id, amount, category, account, type)
     VALUES (?, ?, ?, ?, ?)
@@ -178,13 +194,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn.commit()
 
-    # Step 5: Reply
     await update.message.reply_text(
         f"✅ {category.title()} ₹{amount} {'from' if txn_type=='expense' else 'to'} {account.upper()} recorded."
     )
 
 # =========================
-# MAIN APP
+# APP START
 # =========================
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
